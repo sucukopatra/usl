@@ -5,11 +5,13 @@ from usl.copier import copy_scripts
 from usl.git_ops import ensure_git_repo
 from usl.utils import is_unity_project
 
-# Keep scripts folder **outside** usl/
+# Keep scripts folder outside usl/
 LIBRARY_DIR = Path(__file__).parent.parent.resolve()  # parent of usl/
 SCRIPTS_DIR = LIBRARY_DIR / "scripts"
 
+
 def interactive_mode(scripts, target_dir: Path):
+    """Interactive mode: list scripts and let user select which to add."""
     print("Available scripts:")
     for idx, s in enumerate(scripts, 1):
         print(f"{idx}. {s.name}")
@@ -20,7 +22,7 @@ def interactive_mode(scripts, target_dir: Path):
         return
 
     try:
-        indexes = [int(i)-1 for i in selection.split()]
+        indexes = [int(i) - 1 for i in selection.split()]
     except ValueError:
         print("Invalid input. Enter numbers separated by spaces.")
         return
@@ -36,8 +38,10 @@ def interactive_mode(scripts, target_dir: Path):
         print("No valid scripts selected.")
         return
 
+    # Copy packages into Assets/
     copy_scripts(selected, target_dir)
     print("Done!")
+
 
 def main():
     args = parse_args()
@@ -47,6 +51,7 @@ def main():
         print("This is not a Unity project. Expected Assets/ and ProjectSettings/ folders.")
         return
 
+    # Initialize git if needed
     if not getattr(args, "no_git", False):
         ensure_git_repo(cwd)
 
@@ -55,20 +60,22 @@ def main():
         print(f"No scripts found in USL library: {SCRIPTS_DIR}")
         return
 
-    # Interactive mode
+    # Target directory is always Assets/
+    project_assets = cwd / "Assets"
+
+    # Interactive mode (no subcommand)
     if not getattr(args, "command", None):
-        target_dir = cwd / "Assets" / "Scripts"
-        interactive_mode(scripts, target_dir)
+        interactive_mode(scripts, project_assets)
         return
 
-    # list
+    # Command: list
     if args.command == "list":
         print("Available USL scripts:")
         for s in scripts:
             print(f"- {s.name}")
         return
 
-    # add
+    # Command: add
     if args.command == "add":
         name_map = {s.name: s for s in scripts}
         selected = []
@@ -83,8 +90,7 @@ def main():
             print("No valid scripts selected.")
             return
 
-        target_dir = cwd / "Assets" / "Scripts"
-        copy_scripts(selected, target_dir)
+        copy_scripts(selected, project_assets)
         print("Done!")
         return
 
