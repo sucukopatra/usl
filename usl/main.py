@@ -3,7 +3,7 @@ from usl.cli import parse_args
 from usl.scanner import scan_scripts
 from usl.copier import copy_scripts
 from usl.git_ops import ensure_git_repo
-from usl.utils import is_unity_project
+from usl.utils import is_unity_project, is_git_repo, ask_yes_no
 
 # Keep scripts folder outside usl/
 LIBRARY_DIR = Path(__file__).parent.parent.resolve()  # parent of usl/
@@ -51,9 +51,13 @@ def main():
         print("This is not a Unity project. Expected Assets/ and ProjectSettings/ folders.")
         return
 
-    # Initialize git if needed
+    # Initialize git if needed and interactive
     if not getattr(args, "no_git", False):
-        ensure_git_repo(cwd)
+        if is_git_repo(cwd):
+            print("Git repository already exists.")
+        else:
+            if ask_yes_no("No git repository found. Initialize one?"):
+                ensure_git_repo(cwd)
 
     scripts = scan_scripts(SCRIPTS_DIR)
     if not scripts:
