@@ -1,26 +1,22 @@
 using UnityEngine;
-using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
 
 public class PauseMenu : MonoBehaviour
 {
     public bool isPaused;
-    [SerializeField] InputAction pauseAction;
     [SerializeField] GameObject pauseMenuUI;
 
     private void OnEnable()
     {
-        pauseAction.Enable();
-        pauseAction.performed += OnPause;
+        InputManager.Instance.OnPause += OnPause;
     }
 
     private void OnDisable()
     {
-        pauseAction.performed -= OnPause;
-        pauseAction.Disable();
+        InputManager.Instance.OnPause -= OnPause;
     }
 
-    private void OnPause(InputAction.CallbackContext context)
+    private void OnPause()
     {
         if (isPaused)
             Resume();

@@ -34,17 +34,15 @@ public class DialogueTrigger : MonoBehaviour
 
     private void OnEnable()
     {
-        interactAction.performed += OnInteract;
-        interactAction.Enable();
+        InputManager.Instance.OnInteract += HandleInteract;
     }
 
     private void OnDisable()
     {
-        interactAction.performed -= OnInteract;
-        interactAction.Disable();
+        InputManager.Instance.OnInteract -= HandleInteract;
     }
 
-    private void OnInteract(InputAction.CallbackContext _)
+    private void HandleInteract()
     {
         if (!isPlayerNearby)
             return;
