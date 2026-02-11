@@ -14,7 +14,7 @@ if not exist "%TARGET%" (
 REM Create a batch wrapper called usl.cmd
 (
 echo @echo off
-echo python "%USL_DIR%run.py" %%*
+echo python "%USL_DIR%usl.py" %%*
 ) > "%TARGET%\usl.cmd"
 
 echo USL installed!

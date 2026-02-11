@@ -15,7 +15,7 @@ WRAPPER="$BIN_DIR/usl"
 
 cat > "$WRAPPER" <<EOF
 #!/usr/bin/env bash
-PYTHONPATH="$PROJECT_ROOT" python3 "$PROJECT_ROOT/run.py" "\$@"
+PYTHONPATH="$PROJECT_ROOT" python3 "$PROJECT_ROOT/usl.py" "\$@"
 EOF
 
 chmod +x "$WRAPPER"

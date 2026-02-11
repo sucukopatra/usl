@@ -16,29 +16,25 @@ public class FPController_CC : MonoBehaviour
     [SerializeField] private float gravity = -24f;
     [SerializeField] private float jumpCutGravityMultiplier = 4f;
 
-    [Header("Look Parameters")]
-    [SerializeField] private float mouseSensitivity = 0.1f;
-    [SerializeField] private float upDownLookRange = 80f;
-
     [Header ("References")]
-    [SerializeField] private Camera mainCamera;
 
     private CharacterController characterController;
     private Vector3 currentMovement;
     private float currentSpeed;
     private float verticalRotation;
+    private Transform _cameraTransform;
 
     void Start()
     {
         characterController = GetComponent<CharacterController>();
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
+        _cameraTransform = Camera.main.transform;
     }
 
     void Update()
     {
         HandleMovement();
-        HandleRotation();
     }
 
     private void HandleJumping()
@@ -70,7 +66,7 @@ public class FPController_CC : MonoBehaviour
         if (InputManager.Instance.CrouchBeingHeld)
         {
             characterController.height = crouchHeight;
-            currentSpeed *= crouchSpeedMultiplier;
+            currentSpeed = walkSpeed * crouchSpeedMultiplier;
         }
         else
         {
@@ -84,11 +80,12 @@ public class FPController_CC : MonoBehaviour
         else currentSpeed = walkSpeed;
     }
 
-    private Vector3 CalculateWorldDirection()
+    private Vector3 HandleCamera()
     {
-        Vector3 inputDirection = new Vector3(InputManager.Instance.MoveInput.x, 0f, InputManager.Instance.MoveInput.y);
-        Vector3 worldDirection = transform.TransformDirection(inputDirection);
-        return worldDirection.normalized;
+        Vector3 moveDirection = new Vector3(InputManager.Instance.MoveInput.x, 0f, InputManager.Instance.MoveInput.y);
+        moveDirection = _cameraTransform.forward * moveDirection.z + _cameraTransform.right * moveDirection.x;
+        moveDirection.y = 0f;
+        return moveDirection;
     }
 
     private void HandleMovement()
@@ -97,30 +94,10 @@ public class FPController_CC : MonoBehaviour
         HandleCrouching();
         HandleJumping();
 
-        Vector3 worldDirection = CalculateWorldDirection();
-        currentMovement.x = worldDirection.x * currentSpeed;
-        currentMovement.z = worldDirection.z * currentSpeed;
+        Vector3 moveDirection = HandleCamera();
+        currentMovement.x = moveDirection.x * currentSpeed;
+        currentMovement.z = moveDirection.z * currentSpeed;
 
         characterController.Move(currentMovement * Time.deltaTime);
-    }
-
-    private void ApplyHorizontalRotation(float rotationAmount)
-    {
-        transform.Rotate(0, rotationAmount, 0);
-    }
-
-    private void ApplyVerticalRotation(float rotationAmount)
-    {
-        verticalRotation = Mathf.Clamp(verticalRotation - rotationAmount, -upDownLookRange, upDownLookRange);
-        mainCamera.transform.localRotation = Quaternion.Euler(verticalRotation, 0, 0);
-    }
-
-    private void HandleRotation()
-    {
-        float mouseXRotation = InputManager.Instance.LookInput.x * mouseSensitivity;
-        float mouseYRotation = InputManager.Instance.LookInput.y * mouseSensitivity;
-
-        ApplyHorizontalRotation(mouseXRotation);
-        ApplyVerticalRotation(mouseYRotation);
     }
 }
