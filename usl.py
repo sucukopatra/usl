@@ -12,27 +12,75 @@ import shutil
 import subprocess
 import difflib
 import re
+import logging
+import sys
 from pathlib import Path
-from collections import deque
-from typing import Dict, List
+from typing import Dict, List, Set, Tuple, Optional
+
+# --- Logging Setup ---
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(message)s'  # Simple format for CLI tool
+)
+logger = logging.getLogger(__name__)
 
 # --- Constants ---
 
-# Keep scripts folder outside the main script directory
 LIBRARY_DIR = Path(__file__).parent.resolve()
 SCRIPTS_DIR = LIBRARY_DIR / "scripts"
 UNITY_PACKAGES_MANIFEST = "Packages/manifest.json"
+
+# Files to skip during copy (USL metadata, OS junk, etc.)
+SKIP_FILES = frozenset([
+    'dependencies.txt',  # USL metadata
+    '.DS_Store',         # macOS
+    'Thumbs.db',         # Windows
+    'desktop.ini',       # Windows
+])
+
+# Validation patterns
+DEP_NAME_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*$")
+PACKAGE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*){2,}$")
+
+
+# --- Custom Exceptions ---
+
+class USLError(Exception):
+    """Base exception for USL errors."""
+    pass
+
+
+class DependencyNotFoundError(USLError):
+    """Raised when a required dependency is not found."""
+    pass
+
+
+class InvalidDependencyFileError(USLError):
+    """Raised when a dependencies.txt file is malformed."""
+    pass
+
+
+class ManifestError(USLError):
+    """Raised when there's an issue with the Unity manifest."""
+    pass
 
 
 # --- Helper Classes ---
 
 class InstallationTransaction:
-    """Context manager for safe installations with rollback."""
+    """Context manager for safe installations with rollback.
+    
+    Files and directories are tracked BEFORE operations,
+    ensuring rollback can clean up even partial failures.
+    """
     
     def __init__(self, manifest_path: Path):
         self.manifest_path = manifest_path
         self.backup_path = manifest_path.with_suffix('.backup')
-        self.copied_files = []
+        self.tracked_files = []
+        self.tracked_dirs = []
+        self.committed = False
         
     def __enter__(self):
         # Backup manifest if it exists
@@ -40,46 +88,68 @@ class InstallationTransaction:
             shutil.copy2(self.manifest_path, self.backup_path)
         return self
         
-    def track_file(self, dest_path: Path):
-        """Track a file that was copied (for rollback)."""
-        self.copied_files.append(dest_path)
+    def track_file_operation(self, dest_path: Path) -> None:
+        """Track a file operation BEFORE it happens."""
+        self.tracked_files.append(dest_path)
+        
+    def track_directory_creation(self, dir_path: Path) -> None:
+        """Track a directory creation BEFORE it happens."""
+        if dir_path not in self.tracked_dirs:
+            self.tracked_dirs.append(dir_path)
         
     def commit(self):
-        """Mark transaction as successful."""
+        """Mark transaction as successful - no rollback needed."""
+        self.committed = True
         if self.backup_path.exists():
             self.backup_path.unlink()
-        self.copied_files.clear()
+        self.tracked_files.clear()
+        self.tracked_dirs.clear()
         
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type is not None:
+        if exc_type is not None and not self.committed:
             # Rollback on error
-            print("\n✗ Error occurred! Rolling back changes...")
+            logger.error("\n✗ Error occurred! Rolling back changes...")
             
-            # Restore manifest
+            # Restore manifest backup
             if self.backup_path.exists():
+                if self.manifest_path.exists():
+                    self.manifest_path.unlink()
                 self.backup_path.replace(self.manifest_path)
-                print(f"  Restored manifest backup")
+                logger.info("  Restored manifest backup")
             
-            # Remove copied files
-            for file_path in reversed(self.copied_files):
+            # Remove tracked files
+            for file_path in reversed(self.tracked_files):
                 try:
                     if file_path.exists():
                         file_path.unlink()
-                        # Calculate relative path for display
-                        try:
-                            assets_parent = next((p for p in file_path.parents if p.name == "Assets"), None)
-                            if assets_parent:
-                                rel_display = file_path.relative_to(assets_parent)
-                            else:
-                                rel_display = file_path.name
-                        except (ValueError, IndexError):
-                            rel_display = file_path.name
-                        print(f"  Removed: {rel_display}")
+                        rel_display = self._get_display_path(file_path)
+                        logger.info(f"  Removed: {rel_display}")
                 except Exception as e:
-                    print(f"  Warning: Could not remove {file_path}: {e}")
+                    logger.warning(f"  Could not remove {file_path.name}: {e}")
             
-            print("Rollback complete.")
+            # Remove tracked directories (deepest first)
+            for dir_path in reversed(self.tracked_dirs):
+                try:
+                    if dir_path.exists() and dir_path.is_dir():
+                        if not any(dir_path.iterdir()):
+                            dir_path.rmdir()
+                            logger.debug(f"  Removed empty directory: {dir_path.name}")
+                except OSError:
+                    pass
+            
+            logger.info("Rollback complete.")
+        
         return False  # Re-raise the exception
+    
+    def _get_display_path(self, file_path: Path) -> str:
+        """Get a nice display path for user feedback."""
+        try:
+            assets_parent = next((p for p in file_path.parents if p.name == "Assets"), None)
+            if assets_parent:
+                return str(file_path.relative_to(assets_parent))
+        except ValueError:
+            pass
+        return file_path.name
 
 
 # --- Helper Functions ---
@@ -94,16 +164,16 @@ def is_git_repo(path: Path) -> bool:
     return (path / ".git").is_dir()
 
 
-def ask_yes_no(prompt: str, assume_yes: bool = False) -> bool:
-    """Ask a yes/no question. Returns False on EOF/Ctrl+C."""
+def prompt_yes_no(question: str, assume_yes: bool = False) -> bool:
+    """Prompt user for yes/no confirmation."""
     if assume_yes:
         return True
     
     while True:
         try:
-            answer = input(f"{prompt} (y/n): ").strip().lower()
+            answer = input(f"{question} (y/n): ").strip().lower()
         except (EOFError, KeyboardInterrupt):
-            print("\nCancelled.")
+            logger.info("\nCancelled.")
             return False
         
         if answer in ("y", "yes"):
@@ -113,31 +183,21 @@ def ask_yes_no(prompt: str, assume_yes: bool = False) -> bool:
         print("Please answer y or n.")
 
 
-_DEPENDENCY_NAME_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*$")
-_UNITY_PACKAGE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*){2,}$")
-
-def _is_valid_dependency_name(name: str) -> bool:
-    """
-    Validates if a dependency name starts with a letter and contains only
-    letters, numbers, underscores, and hyphens.
-    """
-    return bool(_DEPENDENCY_NAME_PATTERN.fullmatch(name))
+def validate_dependency_name(name: str) -> bool:
+    """Validate if a dependency name is well-formed."""
+    return bool(DEP_NAME_PATTERN.fullmatch(name))
 
 
-def _is_valid_unity_package_id(package_id: str) -> bool:
-    """
-    Validates if a Unity package ID follows the pattern com.company.package
-    (requires at least 2 dots, starts with lowercase letter).
-    """
-    return bool(_UNITY_PACKAGE_ID_PATTERN.fullmatch(package_id))
+def validate_package_id(package_id: str) -> bool:
+    """Validate if a Unity package ID is well-formed."""
+    return bool(PACKAGE_ID_PATTERN.fullmatch(package_id))
 
 
 def parse_dependencies_file(package_path: Path) -> Dict[str, List[str]]:
     """
-    Parses a dependencies.txt file within a package and returns a dictionary
-    of script and package dependencies.
+    Parse a dependencies.txt file and return script and package dependencies.
     
-    Raises RuntimeError if the dependencies file exists but cannot be read.
+    Raises InvalidDependencyFileError if the file is malformed.
     """
     dependencies_path = package_path / "dependencies.txt"
     if not dependencies_path.is_file():
@@ -146,61 +206,111 @@ def parse_dependencies_file(package_path: Path) -> Dict[str, List[str]]:
     script_deps = []
     package_deps = []
     current_section = None
+    sections_seen = set()
 
     try:
         with open(dependencies_path, "r", encoding="utf-8") as f:
             for line_num, line in enumerate(f, 1):
                 stripped_line = line.strip()
+                
+                # Skip empty lines and comments
                 if not stripped_line or stripped_line.startswith("#"):
                     continue
 
                 line_lower = stripped_line.lower()
+                
+                # Handle section headers
                 if line_lower == "scripts:":
+                    if "scripts" in sections_seen:
+                        raise InvalidDependencyFileError(
+                            f"Duplicate 'scripts:' section at line {line_num} in {dependencies_path}"
+                        )
+                    sections_seen.add("scripts")
                     current_section = "scripts"
                     continue
+                    
                 elif line_lower == "packages:":
+                    if "packages" in sections_seen:
+                        raise InvalidDependencyFileError(
+                            f"Duplicate 'packages:' section at line {line_num} in {dependencies_path}"
+                        )
+                    sections_seen.add("packages")
                     current_section = "packages"
                     continue
 
+                # Handle dependency entries
                 if current_section == "scripts" and stripped_line.startswith("-"):
                     dep_name = stripped_line[1:].strip()
-                    if _is_valid_dependency_name(dep_name):
+                    if validate_dependency_name(dep_name):
                         script_deps.append(dep_name)
                     else:
-                        print(f"Warning: Invalid script dependency name '{dep_name}' in '{dependencies_path}' line {line_num}. Skipping.")
+                        logger.warning(
+                            f"Invalid script dependency name '{dep_name}' "
+                            f"in {dependencies_path.name} line {line_num}. Skipping."
+                        )
+                        
                 elif current_section == "packages" and stripped_line.startswith("-"):
                     dep_name = stripped_line[1:].strip()
-                    if _is_valid_unity_package_id(dep_name):
+                    if validate_package_id(dep_name):
                         package_deps.append(dep_name)
                     else:
-                        print(f"Warning: Invalid Unity package ID '{dep_name}' in '{dependencies_path}' line {line_num}. Skipping.")
+                        logger.warning(
+                            f"Invalid Unity package ID '{dep_name}' "
+                            f"in {dependencies_path.name} line {line_num}. Skipping."
+                        )
+                        
     except IOError as e:
-        raise RuntimeError(
-            f"Cannot read dependencies file for '{package_path.name}'. "
-            f"Installation cannot continue safely. Error: {e}"
+        raise InvalidDependencyFileError(
+            f"Cannot read dependencies file for '{package_path.name}': {e}"
         )
 
     return {"scripts": script_deps, "packages": package_deps}
 
 
-# --- Core Logic ---
+def write_manifest_atomic(manifest_path: Path, manifest_data: dict) -> None:
+    """
+    Atomically write the Unity package manifest.
+    Uses temp file + atomic rename to prevent corruption.
+    """
+    tmp_manifest_path = manifest_path.with_suffix(".tmp")
+    
+    try:
+        # Write to temporary file
+        with open(tmp_manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest_data, f, indent=2)
+        
+        # Validate the JSON before committing
+        with open(tmp_manifest_path, "r", encoding="utf-8") as f:
+            json.load(f)  # Raises JSONDecodeError if corrupt
+        
+        # Atomic rename (POSIX guarantees atomicity)
+        tmp_manifest_path.replace(manifest_path)
+        
+    except (IOError, OSError) as e:
+        if tmp_manifest_path.exists():
+            tmp_manifest_path.unlink()
+        raise ManifestError(f"Failed to write manifest '{manifest_path}': {e}")
+    except json.JSONDecodeError as e:
+        if tmp_manifest_path.exists():
+            tmp_manifest_path.unlink()
+        raise ManifestError(f"Generated invalid JSON for manifest '{manifest_path}': {e}")
 
-def _load_manifest(manifest_path: Path) -> Dict:
-    """
-    Load and parse the Unity package manifest.
-    Returns the manifest dict on success, raises an exception on failure.
-    """
+
+def load_manifest(manifest_path: Path) -> Dict:
+    """Load and parse the Unity package manifest."""
     if not manifest_path.exists():
-        raise FileNotFoundError(f"Unity package manifest not found at: {manifest_path}")
+        raise ManifestError(f"Unity package manifest not found at: {manifest_path}")
     
     try:
         with open(manifest_path, "r", encoding="utf-8") as f:
             return json.load(f)
     except (IOError, OSError) as e:
-        raise IOError(f"Error reading Unity package manifest '{manifest_path}': {e}")
+        raise ManifestError(f"Error reading manifest '{manifest_path}': {e}")
     except json.JSONDecodeError as e:
-        raise ValueError(f"Malformed JSON in Unity package manifest '{manifest_path}': {e}")
+        raise ManifestError(f"Malformed JSON in manifest '{manifest_path}': {e}")
 
+
+# --- Core Logic ---
 
 def scan_scripts(scripts_dir: Path) -> List[Path]:
     """Scan for available script packages."""
@@ -209,413 +319,505 @@ def scan_scripts(scripts_dir: Path) -> List[Path]:
     return sorted([f for f in scripts_dir.iterdir() if f.is_dir()], key=lambda f: f.name.lower())
 
 
-def copy_script_package(package_path: Path, target_dir: Path, assume_yes: bool) -> List[Path]:
+def resolve_script_dependencies(
+    script_path: Path, 
+    name_map: Dict[str, Path], 
+    visited: Optional[Set[Path]] = None
+) -> Tuple[Set[Path], Set[str]]:
     """
-    Copies a script package directly into the target directory (Assets/),
-    preserving its internal folder structure. Prompts for overwrite
-    for each individual file if it already exists.
+    Recursively resolve all dependencies for a script.
     
-    Returns list of all copied file paths (for transaction tracking).
-    Raises exception on error.
-    """
-    print(f"Installing script package: {package_path.name}")
-    copied_files = []
-    
-    # Files to skip during copy (USL metadata, OS junk, etc.)
-    skip_files = {
-        'dependencies.txt',  # USL metadata - should NOT be copied to Unity
-        '.DS_Store',         # macOS
-        'Thumbs.db',         # Windows
-        'desktop.ini',       # Windows
-    }
-    
-    try:
-        for src_item_path in package_path.rglob('*'):
-            if src_item_path.is_dir():
-                continue
-            
-            # Skip metadata and junk files
-            if src_item_path.name in skip_files:
-                continue
-
-            relative_path = src_item_path.relative_to(package_path)
-            dest_item_path = target_dir / relative_path
-            
-            # Cache the relative path for display
-            rel_path_display = dest_item_path.relative_to(target_dir)
-
-            dest_item_path.parent.mkdir(parents=True, exist_ok=True)
-
-            if dest_item_path.exists():
-                if ask_yes_no(f"'{rel_path_display}' already exists. Overwrite?", assume_yes):
-                    shutil.copy2(src_item_path, dest_item_path)
-                    copied_files.append(dest_item_path)
-                    print(f"Overwrote: {rel_path_display}")
-                else:
-                    print(f"Skipped: {rel_path_display}")
-            else:
-                shutil.copy2(src_item_path, dest_item_path)
-                copied_files.append(dest_item_path)
-                print(f"Copied: {rel_path_display}")
+    Returns:
+        Tuple of (script_paths, package_ids) that are required
         
-        print(f"Successfully installed script package: {package_path.name}")
-        return copied_files
+    Raises:
+        DependencyNotFoundError: If a required dependency is not found
+        InvalidDependencyFileError: If a dependencies file is malformed
+    """
+    if visited is None:
+        visited = set()
+    
+    # Already processed this script
+    if script_path in visited:
+        return set(), set()
+    
+    visited.add(script_path)
+    scripts = {script_path}
+    packages = set()
+    
+    # Parse dependencies for this script
+    deps = parse_dependencies_file(script_path)
+    packages.update(deps["packages"])
+    
+    # Recursively resolve script dependencies
+    for dep_name in deps["scripts"]:
+        if dep_name not in name_map:
+            # Suggest similar names
+            suggestions = difflib.get_close_matches(dep_name, name_map.keys(), n=3, cutoff=0.6)
+            error_msg = f"Script '{dep_name}' (required by '{script_path.name}') not found."
+            if suggestions:
+                error_msg += f"\nDid you mean one of these?\n"
+                error_msg += "\n".join(f"  - {s}" for s in suggestions)
+            raise DependencyNotFoundError(error_msg)
+        
+        # Recursively get dependencies
+        dep_scripts, dep_packages = resolve_script_dependencies(
+            name_map[dep_name], name_map, visited
+        )
+        scripts.update(dep_scripts)
+        packages.update(dep_packages)
+    
+    return scripts, packages
 
-    except (IOError, OSError, PermissionError) as e:
-        raise RuntimeError(f"Error installing script package '{package_path.name}': {e}")
 
-def ensure_git_repo(path: Path, assume_yes: bool):
+def copy_script_package(
+    package_path: Path, 
+    target_dir: Path, 
+    assume_yes: bool, 
+    txn: InstallationTransaction
+) -> List[Path]:
+    """
+    Copy a script package to the target directory.
+    
+    Files are tracked BEFORE copying for safe rollback.
+    
+    Returns:
+        List of successfully copied file paths
+    """
+    logger.info(f"Installing script package: {package_path.name}")
+    successfully_copied = []
+    
+    # Collect all files to copy
+    files_to_copy = []
+    for src_item_path in package_path.rglob('*'):
+        if src_item_path.is_dir():
+            continue
+        if src_item_path.name in SKIP_FILES:
+            continue
+        files_to_copy.append(src_item_path)
+    
+    # Process each file
+    for src_item_path in files_to_copy:
+        relative_path = src_item_path.relative_to(package_path)
+        dest_item_path = target_dir / relative_path
+        rel_path_display = dest_item_path.relative_to(target_dir)
+        
+        # Ensure parent directories exist and track them
+        if not dest_item_path.parent.exists():
+            # Collect directories that need to be created
+            dirs_to_create = []
+            for parent in reversed(list(dest_item_path.parents)):
+                if parent.is_relative_to(target_dir) and parent != target_dir:
+                    if not parent.exists():
+                        dirs_to_create.append(parent)
+            
+            # Track directories BEFORE creating them
+            for dir_path in dirs_to_create:
+                txn.track_directory_creation(dir_path)
+            
+            # Create the directories
+            dest_item_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Check if file exists and handle overwrite
+        should_copy = True
+        if dest_item_path.exists():
+            if not assume_yes:
+                should_copy = prompt_yes_no(f"'{rel_path_display}' already exists. Overwrite?")
+                if not should_copy:
+                    logger.info(f"Skipped: {rel_path_display}")
+                    continue
+        
+        # Track the file BEFORE copying (critical for rollback)
+        txn.track_file_operation(dest_item_path)
+        
+        # Perform the copy
+        shutil.copy2(src_item_path, dest_item_path)
+        
+        # Record success
+        successfully_copied.append(dest_item_path)
+        logger.info(f"Copied: {rel_path_display}")
+    
+    logger.info(f"Successfully installed script package: {package_path.name}")
+    return successfully_copied
+
+
+def init_git_repo(path: Path, assume_yes: bool) -> None:
     """Initialize a Git repository if one doesn't exist."""
     if is_git_repo(path):
-        print("Git repository already exists.")
+        logger.info("Git repository already exists.")
         return
-    if ask_yes_no("No git repository found. Initialize one?", assume_yes):
-        try:
-            result = subprocess.run(
-                ["git", "init"],
-                cwd=path,
-                check=True,
-                capture_output=True,
-                text=True
-            )
-            print("Initialized a new git repository.")
-            if result.stdout:
-                print(f"Git output: {result.stdout.strip()}")
-        except subprocess.CalledProcessError as e:
-            print(f"Failed to initialize git repository. Error: {e}")
-            if e.stderr:
-                print(f"Git error output: {e.stderr.strip()}")
-            print("Please ensure Git is installed and configured correctly.")
-        except FileNotFoundError:
-            print("Failed to initialize git repository: 'git' command not found.")
-            print("Please ensure Git is installed and in your system's PATH.")
+        
+    if not prompt_yes_no("No git repository found. Initialize one?", assume_yes):
+        return
+        
+    try:
+        result = subprocess.run(
+            ["git", "init"],
+            cwd=path,
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        logger.info("Initialized a new git repository.")
+        if result.stdout:
+            logger.debug(f"Git output: {result.stdout.strip()}")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to initialize git repository: {e}")
+        if e.stderr:
+            logger.error(f"Git error output: {e.stderr.strip()}")
+        logger.error("Please ensure Git is installed and configured correctly.")
+    except FileNotFoundError:
+        logger.error("Failed to initialize git repository: 'git' command not found.")
+        logger.error("Please ensure Git is installed and in your system's PATH.")
 
 
-def _add_package_to_manifest_in_memory(package_id: str, manifest: Dict) -> None:
+def add_package_to_manifest(package_id: str, manifest: Dict) -> bool:
     """
-    Adds a Unity package ID to the in-memory manifest dictionary.
-    Raises exception on error.
+    Add a Unity package ID to the manifest dictionary.
+    
+    Returns:
+        True if package was added, False if already present
     """
     if "dependencies" not in manifest:
         manifest["dependencies"] = {}
 
     if package_id in manifest["dependencies"]:
-        print(f"Package '{package_id}' already present in manifest.")
-        return
+        logger.info(f"Package '{package_id}' already present in manifest.")
+        return False
     
     manifest["dependencies"][package_id] = "*"
-    print(f"Added '{package_id}' to manifest.")
+    logger.info(f"Added '{package_id}' to manifest.")
+    return True
 
 
-def install_unity_package(package_id: str, project_path: Path) -> int:
-    """Install a Unity package by its ID (e.g., com.unity.inputsystem)."""
+def install_unity_package(package_id: str, project_path: Path) -> None:
+    """
+    Install a Unity package by its ID.
+    
+    Raises:
+        ManifestError: If manifest operations fail
+    """
     manifest_path = project_path / UNITY_PACKAGES_MANIFEST
     
-    try:
-        manifest = _load_manifest(manifest_path)
-    except (FileNotFoundError, IOError, ValueError) as e:
-        print(f"Error: {e}")
-        return 1
-
+    # Load manifest
+    manifest = load_manifest(manifest_path)
+    
+    # Check if already present
     if "dependencies" not in manifest:
         manifest["dependencies"] = {}
-
-    if package_id in manifest["dependencies"]:
-        print(f"Package '{package_id}' already present in manifest.")
-        return 0
     
+    if package_id in manifest["dependencies"]:
+        logger.info(f"Package '{package_id}' already present in manifest.")
+        return
+    
+    # Add package
     manifest["dependencies"][package_id] = "*"
     
-    tmp_manifest_path = manifest_path.with_suffix(".tmp")
-    try:
-        with open(tmp_manifest_path, "w", encoding="utf-8") as f:
-            json.dump(manifest, f, indent=2)
-        tmp_manifest_path.replace(manifest_path)
-    except (IOError, OSError, PermissionError) as e:
-        print(f"Error: Failed to write Unity package manifest '{manifest_path}': {e}")
-        return 1
-
-    print(f"Added '{package_id}' to the project's package manifest.")
-    print("Note: '*' was used for version. Unity will resolve to the latest compatible version.")
-    return 0
+    # Write atomically
+    write_manifest_atomic(manifest_path, manifest)
+    
+    logger.info(f"Added '{package_id}' to the project's package manifest.")
+    logger.info("Note: '*' was used for version. Unity will resolve to the latest compatible version.")
 
 
 # --- Command Handlers ---
 
-def list_scripts(scripts: List[Path]):
+def cmd_list_scripts(scripts: List[Path]) -> None:
     """List available script packages."""
-    print("Available USL scripts:")
+    logger.info("Available USL scripts:")
     if not scripts:
-        print("  (No scripts found)")
+        logger.info("  (No scripts found)")
         return
     for s in scripts:
-        print(f"- {s.name}")
+        logger.info(f"  - {s.name}")
 
 
-def add_scripts(all_available_scripts: List[Path], script_names: List[str], project_assets: Path, project_path: Path, assume_yes: bool) -> int:
+def cmd_add_scripts(
+    all_available_scripts: List[Path], 
+    script_names: List[str], 
+    project_assets: Path, 
+    project_path: Path, 
+    assume_yes: bool
+) -> None:
     """
-    Add selected script packages to the project, handling their dependencies.
-    all_available_scripts: a list of all script Path objects found by scan_scripts
-    script_names: names of the primary scripts to add (from CLI args)
-    project_assets: Path to the Assets folder
-    project_path: Path to the root of the Unity project
-    assume_yes: whether to auto-approve all prompts
+    Add script packages to the project with dependency resolution.
+    
+    Raises:
+        DependencyNotFoundError: If a required dependency is missing
+        InvalidDependencyFileError: If a dependencies file is malformed
+        ManifestError: If manifest operations fail
     """
     name_map = {s.name: s for s in all_available_scripts}
-
+    
     scripts_to_copy = set()
     packages_to_install = set()
-    dependency_cache = {}
-
-    # --- Phase 1: Resolve Dependencies ---
-    try:
-        for primary_script_name in script_names:
-            if primary_script_name not in name_map:
-                print(f"Error: Primary script not found: {primary_script_name}")
-                closest_matches = difflib.get_close_matches(primary_script_name, name_map.keys(), n=3, cutoff=0.6)
-                if closest_matches:
-                    print("Did you mean one of these?")
-                    for match in closest_matches:
-                        print(f"  - {match}")
-                return 1
-
-            current_script_path = name_map[primary_script_name]
-            scripts_to_copy.add(current_script_path)
-
-            # BFS for dependency resolution
-            queue = deque([current_script_path])
-            processed_scripts = set()
-
-            while queue:
-                script_path = queue.popleft()
-                if script_path in processed_scripts:
-                    continue
-                processed_scripts.add(script_path)
-
-                # Use cached dependencies if available
-                if script_path in dependency_cache:
-                    dependencies = dependency_cache[script_path]
-                else:
-                    dependencies = parse_dependencies_file(script_path)
-                    dependency_cache[script_path] = dependencies
-
-                # Add package dependencies
-                for pkg_id in dependencies["packages"]:
-                    packages_to_install.add(pkg_id)
-
-                # Add script dependencies
-                for dep_script_name in dependencies["scripts"]:
-                    if dep_script_name not in name_map:
-                        print(f"Error: Script '{dep_script_name}' (required by '{script_path.name}') not found.")
-                        
-                        # Suggest similar names
-                        matches = difflib.get_close_matches(dep_script_name, name_map.keys(), n=3, cutoff=0.6)
-                        if matches:
-                            print("Did you mean one of these?")
-                            for match in matches:
-                                print(f"  - {match}")
-                        
-                        raise RuntimeError(f"Missing required dependency: {dep_script_name}")
-                    
-                    dep_script_path = name_map[dep_script_name]
-                    scripts_to_copy.add(dep_script_path)
-                    
-                    # Only queue if not yet processed (avoids reprocessing in diamond dependencies)
-                    if dep_script_path not in processed_scripts:
-                        queue.append(dep_script_path)
-
-    except RuntimeError as e:
-        print(f"Error: {e}")
-        return 1
-
-    if not scripts_to_copy and not packages_to_install:
-        print("No scripts or packages to add after dependency resolution.")
-        return 0
-
-    # --- Phase 2: Show Installation Plan ---
-    print("\n--- Installation Plan ---")
-    if scripts_to_copy:
-        print("The following script packages will be copied:")
-        for script_path in sorted(scripts_to_copy, key=lambda p: p.name):
-            print(f"  - {script_path.name}")
-    if packages_to_install:
-        print("The following Unity packages will be added to manifest.json:")
-        for pkg_id in sorted(packages_to_install):
-            print(f"  - {pkg_id}")
-    print("-------------------------\n")
-
-    if not ask_yes_no("Proceed with installation?", assume_yes):
-        print("Installation cancelled by user.")
-        return 0
-
-    # --- Phase 3: Install with Transaction Safety ---
-    print("\nStarting installation...")
-
-    manifest_path = project_path / UNITY_PACKAGES_MANIFEST
-
-    try:
-        with InstallationTransaction(manifest_path) as txn:
-            # Load or create manifest
-            if manifest_path.exists():
-                manifest_data = _load_manifest(manifest_path)
-            else:
-                print(f"Unity package manifest not found at '{manifest_path}'. Creating a new one.")
-                manifest_data = {"dependencies": {}}
-
-            # Add packages to in-memory manifest
-            for pkg_id in sorted(packages_to_install):
-                _add_package_to_manifest_in_memory(pkg_id, manifest_data)
-
-            # Write manifest once
-            if packages_to_install:
-                with open(manifest_path, "w", encoding="utf-8") as f:
-                    json.dump(manifest_data, f, indent=2)
-                print(f"Updated Unity package manifest at '{manifest_path}'.")
-
-            # Copy script packages and track files
-            for script_path in sorted(scripts_to_copy, key=lambda p: p.name):
-                copied_files = copy_script_package(script_path, project_assets, assume_yes)
-                for file_path in copied_files:
-                    txn.track_file(file_path)
-
-            # If we got here, everything worked
-            txn.commit()
-            print("\n✓ Installation complete!")
-            return 0
-
-    except Exception as e:
-        print(f"\n✗ Installation failed: {e}")
-        return 1
-
-
-def install_package(package_id: str, project_path: Path) -> int:
-    """Install a Unity package by validating and adding it to manifest."""
-    if not _is_valid_unity_package_id(package_id):
-        print(f"Error: Invalid Unity package ID format: '{package_id}'")
-        print("Expected format: com.company.package (lowercase, at least 2 dots)")
-        return 1
     
-    print(f"Attempting to install Unity package: {package_id}")
-    return install_unity_package(package_id, project_path)
+    # Phase 1: Resolve Dependencies
+    for primary_script_name in script_names:
+        if primary_script_name not in name_map:
+            suggestions = difflib.get_close_matches(
+                primary_script_name, name_map.keys(), n=3, cutoff=0.6
+            )
+            error_msg = f"Primary script not found: {primary_script_name}"
+            if suggestions:
+                error_msg += "\nDid you mean one of these?\n"
+                error_msg += "\n".join(f"  - {s}" for s in suggestions)
+            raise DependencyNotFoundError(error_msg)
+        
+        # Recursively resolve dependencies
+        scripts, packages = resolve_script_dependencies(
+            name_map[primary_script_name], name_map
+        )
+        scripts_to_copy.update(scripts)
+        packages_to_install.update(packages)
+    
+    if not scripts_to_copy and not packages_to_install:
+        logger.info("No scripts or packages to add after dependency resolution.")
+        return
+    
+    # Phase 2: Show Installation Plan
+    logger.info("\n--- Installation Plan ---")
+    if scripts_to_copy:
+        logger.info("The following script packages will be copied:")
+        for script_path in sorted(scripts_to_copy, key=lambda p: p.name):
+            logger.info(f"  - {script_path.name}")
+    if packages_to_install:
+        logger.info("The following Unity packages will be added to manifest.json:")
+        for pkg_id in sorted(packages_to_install):
+            logger.info(f"  - {pkg_id}")
+    logger.info("-------------------------\n")
+    
+    if not prompt_yes_no("Proceed with installation?", assume_yes):
+        logger.info("Installation cancelled by user.")
+        return
+    
+    # Phase 3: Install with Transaction Safety
+    logger.info("\nStarting installation...")
+    
+    manifest_path = project_path / UNITY_PACKAGES_MANIFEST
+    
+    with InstallationTransaction(manifest_path) as txn:
+        # Load or create manifest
+        if manifest_path.exists():
+            manifest_data = load_manifest(manifest_path)
+        else:
+            logger.info(f"Unity package manifest not found at '{manifest_path}'. Creating a new one.")
+            manifest_data = {"dependencies": {}}
+        
+        # Add packages to in-memory manifest
+        for pkg_id in sorted(packages_to_install):
+            add_package_to_manifest(pkg_id, manifest_data)
+        
+        # Write manifest once (atomically)
+        if packages_to_install:
+            write_manifest_atomic(manifest_path, manifest_data)
+            logger.info(f"Updated Unity package manifest at '{manifest_path}'.")
+        
+        # Copy script packages
+        for script_path in sorted(scripts_to_copy, key=lambda p: p.name):
+            copy_script_package(script_path, project_assets, assume_yes, txn)
+        
+        # Commit transaction
+        txn.commit()
+        logger.info("\n✓ Installation complete!")
 
 
-def run_interactive_mode(project_assets: Path, project_path: Path, assume_yes: bool) -> int:
-    """Run the interactive script selection mode."""
-    # Re-scan to ensure we have all scripts for dependency resolution
+def cmd_install_package(package_id: str, project_path: Path) -> None:
+    """
+    Install a Unity package by ID.
+    
+    Raises:
+        ValueError: If package ID format is invalid
+        ManifestError: If manifest operations fail
+    """
+    if not validate_package_id(package_id):
+        raise ValueError(
+            f"Invalid Unity package ID format: '{package_id}'\n"
+            "Expected format: com.company.package (lowercase, at least 2 dots)"
+        )
+    
+    logger.info(f"Attempting to install Unity package: {package_id}")
+    install_unity_package(package_id, project_path)
+
+
+def cmd_interactive_mode(project_assets: Path, project_path: Path, assume_yes: bool) -> None:
+    """Run interactive script selection mode."""
     scripts = scan_scripts(SCRIPTS_DIR)
     
     if not scripts:
-        print("No local scripts available to install.")
-        return 0
+        logger.info("No local scripts available to install.")
+        return
     
-    print("Available scripts:")
+    logger.info("Available scripts:")
     for idx, s in enumerate(scripts, 1):
-        print(f"{idx}. {s.name}")
-
+        logger.info(f"{idx}. {s.name}")
+    
     try:
         selection = input("Enter numbers to add (e.g., 1 3 5 or 1,2,3), or leave blank to cancel: ").strip()
         if not selection:
-            print("Operation cancelled.")
-            return 0
+            logger.info("Operation cancelled.")
+            return
         
-        # Split by both commas and spaces, then filter out empty strings
+        # Parse selection
         tokens = re.split(r'[,\s]+', selection)
         tokens = [t for t in tokens if t]
         
         indexes = [int(i) - 1 for i in tokens]
         selected_scripts = [scripts[i] for i in indexes if 0 <= i < len(scripts)]
-
+        
         if not selected_scripts:
-            print("No valid scripts selected.")
-            return 1
-
+            raise ValueError("No valid scripts selected.")
+        
         selected_script_names = [s.name for s in selected_scripts]
-        return add_scripts(scripts, selected_script_names, project_assets, project_path, assume_yes)
+        cmd_add_scripts(scripts, selected_script_names, project_assets, project_path, assume_yes)
+        
+    except (ValueError, IndexError) as e:
+        raise ValueError(
+            f"Invalid input: '{selection}'\n"
+            "Please enter numbers (e.g., '1 3 5' or '1,2,3')"
+        )
 
-    except (ValueError, IndexError):
-        print(f"Invalid input: '{selection}'")
-        print("Please enter numbers (e.g., '1 3 5' or '1,2,3')")
-        return 1
 
+# --- CLI Entry Point ---
 
-# --- Main ---
-
-def _parse_args():
-    """Parses command-line arguments for the USL tool."""
-    # Parent parser for shared arguments
+def parse_args():
+    """Parse command-line arguments."""
     parent_parser = argparse.ArgumentParser(add_help=False)
-    parent_parser.add_argument("-y", "--yes", action="store_true", help="Automatically answer yes to all prompts.")
+    parent_parser.add_argument(
+        "-y", "--yes", 
+        action="store_true", 
+        help="Automatically answer yes to all prompts."
+    )
     
     parser = argparse.ArgumentParser(
         prog="usl",
         description="Unity Script Library - A tool for managing scripts and packages in Unity projects."
     )
-    parser.add_argument("--init-git", action="store_true", help="Initialize a new git repository if one doesn't exist.")
-    parser.add_argument("-y", "--yes", action="store_true", help="Automatically answer yes to all prompts.")
-
+    parser.add_argument(
+        "--init-git", 
+        action="store_true", 
+        help="Initialize a new git repository if one doesn't exist."
+    )
+    parser.add_argument(
+        "-y", "--yes", 
+        action="store_true", 
+        help="Automatically answer yes to all prompts."
+    )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Enable verbose logging."
+    )
+    
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
-
-    # Add parent_parser to each subcommand so -y works after the command too
-    subparsers.add_parser("list", parents=[parent_parser], help="List available local script packages.")
-
-    add_parser = subparsers.add_parser("add", parents=[parent_parser], help="Add local script packages to the Unity project.")
-    add_parser.add_argument("scripts", nargs="+", metavar="SCRIPT", help="Names of the script packages to add.")
-
-    install_parser = subparsers.add_parser("install", parents=[parent_parser], help="Install a Unity package by its ID.")
-    install_parser.add_argument("package_id", metavar="PACKAGE_ID", help="The Unity package ID (e.g., com.unity.inputsystem).")
-
+    
+    subparsers.add_parser(
+        "list", 
+        parents=[parent_parser], 
+        help="List available local script packages."
+    )
+    
+    add_parser = subparsers.add_parser(
+        "add", 
+        parents=[parent_parser], 
+        help="Add local script packages to the Unity project."
+    )
+    add_parser.add_argument(
+        "scripts", 
+        nargs="+", 
+        metavar="SCRIPT", 
+        help="Names of the script packages to add."
+    )
+    
+    install_parser = subparsers.add_parser(
+        "install", 
+        parents=[parent_parser], 
+        help="Install a Unity package by its ID."
+    )
+    install_parser.add_argument(
+        "package_id", 
+        metavar="PACKAGE_ID", 
+        help="The Unity package ID (e.g., com.unity.inputsystem)."
+    )
+    
     return parser.parse_args()
 
 
-def _run_command(args, cwd: Path):
-    """Routes to the appropriate command handler based on parsed arguments."""
+def run_command(args, cwd: Path) -> int:
+    """
+    Route to the appropriate command handler.
+    
+    Returns:
+        Exit code (0 for success, 1 for error)
+    """
+    # Set logging level
+    if args.verbose:
+        logger.setLevel(logging.DEBUG)
+    
     # Validate SCRIPTS_DIR exists
     if not SCRIPTS_DIR.exists():
-        print(f"Error: Scripts directory not found at: {SCRIPTS_DIR}")
-        print("Please create it or run from the correct location.")
+        logger.error(f"Error: Scripts directory not found at: {SCRIPTS_DIR}")
+        logger.error("Please create it or run from the correct location.")
         return 1
     
     assume_yes = getattr(args, "yes", False)
-
+    
+    # List command doesn't require Unity project
     if args.command == "list":
         scripts = scan_scripts(SCRIPTS_DIR)
-        list_scripts(scripts)
+        cmd_list_scripts(scripts)
         return 0
-
-    # For all other commands, check for Unity project
+    
+    # All other commands require Unity project
     if not is_unity_project(cwd):
-        print("Error: This command must be run from a Unity project directory.")
-        print("       (Expected to find 'Assets' and 'ProjectSettings' subdirectories.)")
+        logger.error("Error: This command must be run from a Unity project directory.")
+        logger.error("       (Expected to find 'Assets' and 'ProjectSettings' subdirectories.)")
         return 1
-
+    
+    # Init git if requested
     if args.init_git:
-        ensure_git_repo(cwd, assume_yes)
-
-    if args.command == "add":
-        scripts = scan_scripts(SCRIPTS_DIR)
-        return add_scripts(scripts, args.scripts, cwd / "Assets", cwd, assume_yes)
-
-    elif args.command == "install":
-        return install_package(args.package_id, cwd)
-
-    else:  # Interactive mode
-        if assume_yes:
-            print("Error: Interactive mode cannot be used with --yes flag.")
-            print("Please specify scripts to add or remove --yes flag.")
-            return 1
+        init_git_repo(cwd, assume_yes)
+    
+    # Route to command
+    try:
+        if args.command == "add":
+            scripts = scan_scripts(SCRIPTS_DIR)
+            cmd_add_scripts(scripts, args.scripts, cwd / "Assets", cwd, assume_yes)
+            
+        elif args.command == "install":
+            cmd_install_package(args.package_id, cwd)
+            
+        else:  # Interactive mode
+            if assume_yes:
+                logger.error("Error: Interactive mode cannot be used with --yes flag.")
+                logger.error("Please specify scripts to add or remove --yes flag.")
+                return 1
+            
+            logger.info("No command specified. Entering interactive mode...")
+            cmd_interactive_mode(cwd / "Assets", cwd, assume_yes)
         
-        print("No command specified. Entering interactive mode...")
-        return run_interactive_mode(cwd / "Assets", cwd, assume_yes)
-
-    return 0
+        return 0
+        
+    except (DependencyNotFoundError, InvalidDependencyFileError, ManifestError, ValueError) as e:
+        logger.error(f"Error: {e}")
+        return 1
+    except KeyboardInterrupt:
+        logger.info("\nCancelled by user.")
+        return 130  # Standard exit code for SIGINT
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        if args.verbose:
+            import traceback
+            traceback.print_exc()
+        return 2
 
 
 def main():
     """Main entry point for the USL tool."""
-    args = _parse_args()
+    args = parse_args()
     cwd = Path.cwd()
-    return _run_command(args, cwd)
+    return run_command(args, cwd)
 
 
 if __name__ == "__main__":
-    exit(main())
+    sys.exit(main())
