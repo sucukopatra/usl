@@ -450,6 +450,7 @@ def cmd_interactive_mode(project_assets: Path, project_path: Path) -> None:
     for idx, s in enumerate(scripts, 1):
         logger.info(f"{idx}. {s.name}")
 
+    selection = ""
     try:
         selection = input("Enter numbers to add (e.g., 1 3 5 or 1,2,3), or leave blank to cancel: ").strip()
         if not selection:
@@ -480,16 +481,21 @@ def parse_args():
         description="Unity Script Library - manage scripts and packages in Unity projects."
     )
     parser.add_argument("--init-git", action="store_true", help="Initialize a git repo if one doesn't exist.")
-    parser.add_argument("-y", "--yes", action="store_true", help="Automatically answer yes to all prompts.")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging.")
+
+    # Shared flags on a parent parser — the standard argparse pattern for
+    # flags that belong to every subcommand. add_help=False prevents argparse
+    # from adding a duplicate -h when the parent is inherited.
+    shared = argparse.ArgumentParser(add_help=False)
+    shared.add_argument("-y", "--yes", action="store_true", help="Automatically answer yes to all prompts.")
+    shared.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging.")
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
-    subparsers.add_parser("list", help="List available local script packages.")
+    subparsers.add_parser("list", parents=[shared], help="List available local script packages.")
 
-    add_parser = subparsers.add_parser("add", help="Add local script packages to the Unity project.")
+    add_parser = subparsers.add_parser("add", parents=[shared], help="Add local script packages to the Unity project.")
     add_parser.add_argument("scripts", nargs="+", metavar="SCRIPT", help="Script package names to add.")
 
-    install_parser = subparsers.add_parser("install", help="Install a Unity package by its ID.")
+    install_parser = subparsers.add_parser("install", parents=[shared], help="Install a Unity package by its ID.")
     install_parser.add_argument("package_id", metavar="PACKAGE_ID", help="Unity package ID (e.g., com.unity.inputsystem).")
 
     return parser.parse_args()

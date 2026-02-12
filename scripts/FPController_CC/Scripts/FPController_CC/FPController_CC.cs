@@ -44,7 +44,7 @@ public class FPController_CC : MonoBehaviour
             if (currentMovement.y < 0)
                currentMovement.y = -2f;
 
-            if (InputManager.Instance.JumpJustPressed)
+            if (InputManager.Instance.JumpPressed)
             {
                 currentMovement.y = Mathf.Sqrt(jumpHeight * -2f * gravity);
             }
@@ -53,7 +53,7 @@ public class FPController_CC : MonoBehaviour
         {
             float currentGravity = gravity;
 
-            if (!InputManager.Instance.JumpBeingHeld && currentMovement.y > 0)
+            if (!InputManager.Instance.JumpHeld && currentMovement.y > 0)
             {
                 currentGravity *= jumpCutGravityMultiplier;
             }
@@ -63,7 +63,7 @@ public class FPController_CC : MonoBehaviour
     }
     private void HandleCrouching()
     {
-        if (InputManager.Instance.CrouchBeingHeld)
+        if (InputManager.Instance.CrouchHeld)
         {
             characterController.height = crouchHeight;
             currentSpeed = walkSpeed * crouchSpeedMultiplier;
@@ -76,13 +76,13 @@ public class FPController_CC : MonoBehaviour
 
     private void HandleSprint()
     {
-        if(InputManager.Instance.SprintBeingHeld) currentSpeed = walkSpeed * sprintMultiplier;
+        if(InputManager.Instance.SprintHeld) currentSpeed = walkSpeed * sprintMultiplier;
         else currentSpeed = walkSpeed;
     }
 
     private Vector3 HandleCamera()
     {
-        Vector3 moveDirection = new Vector3(InputManager.Instance.MoveInput.x, 0f, InputManager.Instance.MoveInput.y);
+        Vector3 moveDirection = new Vector3(InputManager.Instance.Move.x, 0f, InputManager.Instance.Move.y);
         moveDirection = _cameraTransform.forward * moveDirection.z + _cameraTransform.right * moveDirection.x;
         moveDirection.y = 0f;
         return moveDirection;

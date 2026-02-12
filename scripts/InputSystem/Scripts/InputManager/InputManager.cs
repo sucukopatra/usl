@@ -7,20 +7,20 @@ public class InputManager : MonoBehaviour
     public static InputManager Instance;
 
     // Polling inputs
-    public Vector2 MoveInput { get; private set; }
-    public Vector2 LookInput { get; private set; }
-    public bool JumpJustPressed { get; private set; }
-    public bool JumpBeingHeld { get; private set; }
+    public Vector2 Move { get; private set; }
+    public Vector2 Look { get; private set; }
+    public bool JumpPressed { get; private set; }
+    public bool JumpHeld { get; private set; }
     public bool JumpReleased { get; private set; }
-    public bool SprintBeingHeld { get; private set; }
-    public bool CrouchBeingHeld { get; private set; }
-    public bool AttackPressed { get; private set; }
-    public bool DashPressed { get; private set; }
+    public bool SprintHeld { get; private set; }
+    public bool CrouchHeld { get; private set; }
 
     // Event-driven inputs
     public event Action OnInteract;
     public event Action OnAdvance;
     public event Action OnPause;
+    public event Action OnAttack;
+    public event Action OnDash;
 
     private PlayerInput _playerInput;
     private InputAction _moveAction;
@@ -77,17 +77,14 @@ public class InputManager : MonoBehaviour
 
     private void UpdatePollingInputs()
     {
-        MoveInput = _moveAction.ReadValue<Vector2>();
-        LookInput = _lookAction.ReadValue<Vector2>();
+        Move = _moveAction.ReadValue<Vector2>();
+        Look = _lookAction.ReadValue<Vector2>();
 
-        JumpJustPressed = _jumpAction.WasPressedThisFrame();
-        JumpBeingHeld = _jumpAction.IsPressed();
+        JumpPressed = _jumpAction.WasPressedThisFrame();
+        JumpHeld = _jumpAction.IsPressed();
         JumpReleased = _jumpAction.WasReleasedThisFrame();
-        SprintBeingHeld = _sprintAction.IsPressed();
-        CrouchBeingHeld = _crouchAction.IsPressed();
-
-        AttackPressed = _attackAction.WasPressedThisFrame();
-        DashPressed = _dashAction.WasPressedThisFrame();
+        SprintHeld = _sprintAction.IsPressed();
+        CrouchHeld = _crouchAction.IsPressed();
     }
 
     private void RegisterEventInputs()
@@ -95,6 +92,8 @@ public class InputManager : MonoBehaviour
         _interactAction.performed += HandleInteract;
         _advanceAction.performed += HandleAdvance;
         _pauseAction.performed += HandlePause;
+        _attackAction.performed += HandleAttack;
+        _dashAction.performed += HandleDash;
     }
 
     private void UnregisterEventInputs()
@@ -102,13 +101,15 @@ public class InputManager : MonoBehaviour
         _interactAction.performed -= HandleInteract;
         _advanceAction.performed -= HandleAdvance;
         _pauseAction.performed -= HandlePause;
+        _attackAction.performed -= HandleAttack;
+        _dashAction.performed -= HandleDash;
     }
 
     private void HandleInteract(InputAction.CallbackContext ctx) => OnInteract?.Invoke();
-
     private void HandleAdvance(InputAction.CallbackContext ctx) => OnAdvance?.Invoke();
-
     private void HandlePause(InputAction.CallbackContext ctx) => OnPause?.Invoke();
+    private void HandleAttack(InputAction.CallbackContext ctx) => OnAttack?.Invoke();
+    private void HandleDash(InputAction.CallbackContext ctx) => OnDash?.Invoke();
 
     public void SwitchToGameplay()
     {
