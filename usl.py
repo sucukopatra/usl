@@ -501,7 +501,7 @@ def parse_args():
     return parser.parse_args()
 
 def run_command(args, cwd: Path) -> int:
-    if args.verbose:
+    if getattr(args, "verbose", False):
         logger.setLevel(logging.DEBUG)
 
     if not SCRIPTS_DIR.exists():
