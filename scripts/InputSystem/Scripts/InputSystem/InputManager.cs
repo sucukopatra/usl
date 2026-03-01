@@ -30,6 +30,7 @@ public class InputManager : MonoBehaviour
     public event Action OnSubmit;
     public event Action OnCancel;
 
+    public PlayerInput PlayerInput => _playerInput;
     private PlayerInput _playerInput;
 
     // Gameplay actions

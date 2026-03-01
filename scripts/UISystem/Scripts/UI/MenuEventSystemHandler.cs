@@ -56,14 +56,17 @@ public class MenuEventSystemHandler : MonoBehaviour
     protected virtual IEnumerator SelectAfterDelay()
     {
         yield return null;
-        EventSystem.current.SetSelectedGameObject(_firstSelected.gameObject);
+        if (EventSystem.current != null && _firstSelected != null)
+        {
+            EventSystem.current.SetSelectedGameObject(_firstSelected.gameObject);
+        }
     }
 
     public virtual void OnDisable()
     {
         InputManager.Instance.OnNavigate -= OnNavigate;
-        _scaleUpTween?.Kill(true);
-        _scaleDownTween?.Kill(true);
+        _scaleUpTween?.Kill(false);
+        _scaleDownTween?.Kill(false);
     }
 
     protected virtual void AddSelectionListeners(Selectable selectable)
@@ -108,21 +111,36 @@ public class MenuEventSystemHandler : MonoBehaviour
 
     public void OnSelect(BaseEventData eventData)
     {
+        if (eventData?.selectedObject == null)
+            return;
+
         SoundEvent?.Invoke();
         _lastSelected =  eventData.selectedObject.GetComponent<Selectable>();
         if(_animationExclusions.Contains(eventData.selectedObject))
             return;
         Vector3 newScale = eventData.selectedObject.transform.localScale * _selectedAnimationScale;
-        _scaleUpTween = eventData.selectedObject.transform.DOScale(newScale, _scaleDuration);
+        _scaleUpTween?.Kill(false);
+        _scaleUpTween = eventData.selectedObject.transform
+            .DOScale(newScale, _scaleDuration)
+            .SetUpdate(true);
 
     }
 
     public void OnDeselect(BaseEventData eventData)
     {
+        if (eventData?.selectedObject == null)
+            return;
+
         if(_animationExclusions.Contains(eventData.selectedObject))
             return;
         Selectable sel = eventData.selectedObject.GetComponent<Selectable>();
-        _scaleDownTween = eventData.selectedObject.transform.DOScale(_scales[sel], _scaleDuration);
+        if (sel == null || !_scales.ContainsKey(sel))
+            return;
+
+        _scaleDownTween?.Kill(false);
+        _scaleDownTween = eventData.selectedObject.transform
+            .DOScale(_scales[sel], _scaleDuration)
+            .SetUpdate(true);
 
     }
 
@@ -130,13 +148,16 @@ public class MenuEventSystemHandler : MonoBehaviour
     {
         PointerEventData pointerEventData = eventData as PointerEventData;
 
-        if (pointerEventData != null)
+        if (pointerEventData != null && pointerEventData.pointerEnter != null)
         {
             Selectable sel = pointerEventData.pointerEnter.GetComponentInParent<Selectable>();
             if (sel is null)
             {
                 sel = pointerEventData.pointerEnter.GetComponentInChildren<Selectable>();
             }
+            if (sel == null)
+                return;
+
             pointerEventData.selectedObject = sel.gameObject;
         }
     }
@@ -159,4 +180,3 @@ public class MenuEventSystemHandler : MonoBehaviour
         }
     }
 }
-

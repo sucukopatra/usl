@@ -10,7 +10,8 @@ GameObject:
   m_Component:
   - component: {fileID: 7558618450212255770}
   - component: {fileID: 2462279845326345391}
-  - component: {fileID: 2279470773596509950}
+  - component: {fileID: 5932298314066811227}
+  - component: {fileID: 8063437725745199115}
   m_Layer: 0
   m_Name: InputManager
   m_TagString: Untagged
@@ -142,12 +143,20 @@ MonoBehaviour:
       m_Calls: []
     m_ActionId: 847e04b7-fbe9-47f8-8f67-40165ef5f175
     m_ActionName: 'UI/CancelRebind[/Keyboard/escape]'
+  - m_PersistentCalls:
+      m_Calls: []
+    m_ActionId: c5347120-7b8a-41b3-a01c-d962cf822c23
+    m_ActionName: 'Gameplay/Pause[/Keyboard/escape]'
+  - m_PersistentCalls:
+      m_Calls: []
+    m_ActionId: 02a41c5c-fea9-40d0-8aaa-4c7e92f90791
+    m_ActionName: 'UI/Advance[/Keyboard/enter,/Keyboard/space,/Mouse/leftButton]'
   m_NeverAutoSwitchControlSchemes: 0
   m_DefaultControlScheme: 
-  m_DefaultActionMap: df70fa95-8a34-4494-b137-73ab6b9c7d37
+  m_DefaultActionMap: Gameplay
   m_SplitScreenIndex: 0
   m_Camera: {fileID: 0}
---- !u!114 &2279470773596509950
+--- !u!114 &5932298314066811227
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -156,6 +165,23 @@ MonoBehaviour:
   m_GameObject: {fileID: 660282034702765813}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: d0e99eeb9eb9609c38d4dae8611152e4, type: 3}
+  m_Script: {fileID: 11500000, guid: 3e3db99f1097124e6a983ed23dd01cfe, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::InputDeviceDetector
+  iconSets:
+  - {fileID: 11400000, guid: 89b26a2ff7e1d6df3a5173d153d58b45, type: 2}
+  - {fileID: 11400000, guid: 1ca44137294b3641390f9f0e56192651, type: 2}
+  - {fileID: 11400000, guid: 8bc5885df3f23bd9f823802b877a502c, type: 2}
+  - {fileID: 11400000, guid: 30a9862b5d28c58fd9506dcc693d709b, type: 2}
+--- !u!114 &8063437725745199115
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 660282034702765813}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7a4b5ff201087ea2fadac36f2776dcc8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::InputManager
