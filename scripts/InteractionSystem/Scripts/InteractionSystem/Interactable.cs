@@ -2,7 +2,7 @@ using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.InputSystem;
 
-public class Interactable : MonoBehaviour, IInteractable, IHasInteractionPromptData
+public abstract class Interactable : MonoBehaviour, IInteractable, IHasInteractionPromptData
 {
     [Header("Prompt UI")]
     [SerializeField] private string promptVerb = "Interact";
@@ -25,24 +25,29 @@ public class Interactable : MonoBehaviour, IInteractable, IHasInteractionPromptD
     public void Interact()
     {
         if (!CanInteract()) return;
+        HandleInteract();
         onInteract?.Invoke();
 
         if (disableAfterInteract)
             isEnabled = false;
     }
 
-    public void OnFocusGained() => onFocusGained?.Invoke();
-    public void OnFocusLost() => onFocusLost?.Invoke();
-
-    public void EnableInteraction()
-    {
-        isEnabled = true;
+    public void FocusGained() {
+        HandleFocusGained();
+        onFocusGained?.Invoke();
+    }
+    public void FocusLost() {
+        HandleFocusLost();
+        onFocusLost?.Invoke();
     }
 
-    public void DisableInteraction()
-    {
-        isEnabled = false;
-    }
+    protected virtual void HandleInteract() {}
+    protected virtual void HandleFocusGained() {}
+    protected virtual void HandleFocusLost() {}
+
+    public void EnableInteraction() => isEnabled = true;
+
+    public void DisableInteraction() => isEnabled = false;
 
     public InteractionPromptData GetInteractionPromptData()
     {
@@ -51,7 +56,7 @@ public class Interactable : MonoBehaviour, IInteractable, IHasInteractionPromptD
             promptVerb,
             inputAction,
             promptDisplayMode,
-            promptAnchor != null ? promptAnchor : transform,
+            promptAnchor ?? transform,
             promptWorldOffset);
     }
 }
