@@ -32,11 +32,11 @@ public abstract class Interactable : MonoBehaviour, IInteractable, IHasInteracti
             isEnabled = false;
     }
 
-    public void FocusGained() {
+    public void OnFocusGained() {
         HandleFocusGained();
         onFocusGained?.Invoke();
     }
-    public void FocusLost() {
+    public void OnFocusLost() {
         HandleFocusLost();
         onFocusLost?.Invoke();
     }
