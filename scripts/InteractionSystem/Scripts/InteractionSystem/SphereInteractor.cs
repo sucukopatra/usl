@@ -33,7 +33,11 @@ public class SphereInteractor : Interactor
             var col = _buffer[i];
             if (!col) continue;
 
-            var interactable = col.GetComponentInParent<IInteractable>();
+            var interactable =
+                col.GetComponent<IInteractable>() ??
+                col.GetComponentInParent<IInteractable>() ??
+                col.GetComponentInChildren<IInteractable>();
+
             if (interactable == null || !interactable.CanInteract()) continue;
             if (!_seen.Add(interactable)) continue;
 

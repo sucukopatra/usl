@@ -2,7 +2,7 @@ using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.InputSystem;
 
-public abstract class Interactable : MonoBehaviour, IInteractable, IHasInteractionPromptData
+public class Interactable : MonoBehaviour, IInteractable, IHasInteractionPromptData
 {
     [Header("Prompt UI")]
     [SerializeField] private string promptVerb = "Interact";
@@ -15,38 +15,42 @@ public abstract class Interactable : MonoBehaviour, IInteractable, IHasInteracti
 
     [SerializeField] private bool isEnabled = true;
     [SerializeField] private bool disableAfterInteract = false;
+    protected bool DisableAfterInteract => disableAfterInteract;
 
     [SerializeField] private UnityEvent onInteract;
     [SerializeField] private UnityEvent onFocusGained;
     [SerializeField] private UnityEvent onFocusLost;
 
-    public bool CanInteract() => isEnabled && gameObject.activeInHierarchy;
+    public virtual bool CanInteract() => isEnabled && gameObject.activeInHierarchy;
 
     public void Interact()
     {
         if (!CanInteract()) return;
-        HandleInteract();
+        if (!HandleInteract()) return;
+
         onInteract?.Invoke();
 
         if (disableAfterInteract)
             isEnabled = false;
     }
 
-    public void OnFocusGained() {
+    public void OnFocusGained()
+    {
         HandleFocusGained();
         onFocusGained?.Invoke();
     }
-    public void OnFocusLost() {
+
+    public void OnFocusLost()
+    {
         HandleFocusLost();
         onFocusLost?.Invoke();
     }
 
-    protected virtual void HandleInteract() {}
-    protected virtual void HandleFocusGained() {}
-    protected virtual void HandleFocusLost() {}
+    protected virtual bool HandleInteract() => true;
+    protected virtual void HandleFocusGained() { }
+    protected virtual void HandleFocusLost() { }
 
     public void EnableInteraction() => isEnabled = true;
-
     public void DisableInteraction() => isEnabled = false;
 
     public InteractionPromptData GetInteractionPromptData()
