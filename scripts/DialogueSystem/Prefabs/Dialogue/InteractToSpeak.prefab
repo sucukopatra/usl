@@ -43,8 +43,6 @@ GameObject:
   m_Component:
   - component: {fileID: 6362527661607573280}
   - component: {fileID: 2796743879275049095}
-  - component: {fileID: 3635505947430921820}
-  - component: {fileID: 8242494033305839265}
   m_Layer: 0
   m_Name: DialogueTrigger
   m_TagString: Untagged
@@ -79,121 +77,39 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7ae2919ab7dbd0b2ab5ca31599b12ed3, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DialogueTrigger
+  promptVerb: Interact
+  promptDisplayMode: 1
+  promptAnchor: {fileID: 6362527661607573280}
+  promptWorldOffset: {x: 0, y: 0.8, z: 0}
+  inputAction: {fileID: 1781555164194001046, guid: 4607cf0651a1251bcb7e044cf5d125db, type: 3}
+  isEnabled: 1
+  disableAfterInteract: 0
+  onInteract:
+    m_PersistentCalls:
+      m_Calls: []
+  onFocusGained:
+    m_PersistentCalls:
+      m_Calls: []
+  onFocusLost:
+    m_PersistentCalls:
+      m_Calls: []
   dialogueManager: {fileID: 0}
+  dialogue:
+  - speaker: 3
+    text: Bana mama ver, miyav!! <i>oyun</i> oynicam <b>pic</b> herif.  ||||| 31.
+    showPortrait: 1
+    expression: 2
+  - speaker: 3
+    text: kedi mamasi, kazandin.
+    showPortrait: 1
+    expression: 0
+  - speaker: 3
+    text: kedi mamasi, kazandin.
+    showPortrait: 0
+    expression: 0
   interactionSymbol: {fileID: 7004878969302332259}
-  hasNotInteractedIcon: {fileID: 0}
+  hasNotInteractedIcon: {fileID: -9095717837082945937, guid: bd7fe5ab5ef2a0213b7f1a056b5b944a, type: 3}
   hasInteractedIcon: {fileID: 0}
-  playOnlyOnce: 0
-  interactAction:
-    m_Name: Interact
-    m_Type: 0
-    m_ExpectedControlType: 
-    m_Id: bfff7c92-9611-48e9-980d-60edf83ed7a3
-    m_Processors: 
-    m_Interactions: 
-    m_SingletonActionBindings:
-    - m_Name: 
-      m_Id: 56182d44-9d10-4156-9046-e6d6f082d1c2
-      m_Path: <Keyboard>/e
-      m_Interactions: 
-      m_Processors: 
-      m_Groups: 
-      m_Action: Interact
-      m_Flags: 0
-    m_Flags: 0
-  dialogue: []
---- !u!61 &3635505947430921820
-BoxCollider2D:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 3906002258652461329}
-  m_Enabled: 1
-  serializedVersion: 3
-  m_Density: 1
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_ForceSendLayers:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  m_ForceReceiveLayers:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  m_ContactCaptureLayers:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  m_CallbackLayers:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  m_IsTrigger: 1
-  m_UsedByEffector: 0
-  m_CompositeOperation: 0
-  m_CompositeOrder: 0
-  m_Offset: {x: 0, y: 0}
-  m_SpriteTilingProperty:
-    border: {x: 0, y: 0, z: 0, w: 0}
-    pivot: {x: 0, y: 0}
-    oldSize: {x: 0, y: 0}
-    newSize: {x: 0, y: 0}
-    adaptiveTilingThreshold: 0
-    drawMode: 0
-    adaptiveTiling: 0
-  m_AutoTiling: 0
-  m_Size: {x: 1, y: 1}
-  m_EdgeRadius: 0
---- !u!61 &8242494033305839265
-BoxCollider2D:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 3906002258652461329}
-  m_Enabled: 1
-  serializedVersion: 3
-  m_Density: 1
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_ForceSendLayers:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  m_ForceReceiveLayers:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  m_ContactCaptureLayers:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  m_CallbackLayers:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  m_IsTrigger: 1
-  m_UsedByEffector: 0
-  m_CompositeOperation: 0
-  m_CompositeOrder: 0
-  m_Offset: {x: 0, y: 0}
-  m_SpriteTilingProperty:
-    border: {x: 0, y: 0, z: 0, w: 0}
-    pivot: {x: 0, y: 0}
-    oldSize: {x: 0, y: 0}
-    newSize: {x: 0, y: 0}
-    adaptiveTilingThreshold: 0
-    drawMode: 0
-    adaptiveTiling: 0
-  m_AutoTiling: 0
-  m_Size: {x: 5, y: 5}
-  m_EdgeRadius: 0
 --- !u!1 &7004878969302332259
 GameObject:
   m_ObjectHideFlags: 0
