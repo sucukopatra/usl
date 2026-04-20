@@ -1,8 +1,5 @@
 Scripts:
--InputSystem
--UISystem
--InteractionSystem
+-Input
 
 Packages:
 -com.unity.cinemachine
-

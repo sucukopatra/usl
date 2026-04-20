@@ -1,6 +1,6 @@
 Scripts:
--InputSystem
+-Input
+-UI
 
 Packages:
 -com.unity.cinemachine
-
